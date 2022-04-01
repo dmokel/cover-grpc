@@ -1,5 +1,0 @@
-package covergeerpc
-
-func main() {
-
-}

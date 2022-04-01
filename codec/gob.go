@@ -41,9 +41,14 @@ func (c *GobCodec) ReadBody(body interface{}) error {
 // Write ...
 func (c *GobCodec) Write(h *Header, body interface{}) (err error) {
 	defer func() {
-		_ = c.buf.Flush()
 		if err != nil {
 			_ = c.Close()
+			return
+		}
+		err = c.buf.Flush()
+		if err != nil {
+			_ = c.Close()
+			return
 		}
 	}()
 
