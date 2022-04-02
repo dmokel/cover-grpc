@@ -1,4 +1,4 @@
-package covergrpc
+package drpc
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dmokel/cover-grpc/codec"
+	"github.com/dmokel/dprc/codec"
 )
 
 func TestClient_DialTimeout(t *testing.T) {

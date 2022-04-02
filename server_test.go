@@ -1,4 +1,4 @@
-package covergrpc
+package drpc
 
 import (
 	"fmt"

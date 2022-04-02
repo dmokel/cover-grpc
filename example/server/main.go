@@ -4,7 +4,7 @@ import (
 	"log"
 	"net"
 
-	covergrpc "github.com/dmokel/cover-grpc"
+	drpc "github.com/dmokel/dprc"
 )
 
 // Foo ...
@@ -22,7 +22,7 @@ func (f *Foo) Sum(args Args, reply *int) error {
 
 func main() {
 	var foo Foo
-	if err := covergrpc.Register(&foo); err != nil {
+	if err := drpc.Register(&foo); err != nil {
 		log.Fatal("register failed, error: ", err)
 	}
 
@@ -30,5 +30,5 @@ func main() {
 	if err != nil {
 		log.Fatal("network error:", err)
 	}
-	log.Println(covergrpc.Serve(l))
+	log.Println(drpc.Serve(l))
 }

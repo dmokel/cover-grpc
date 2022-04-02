@@ -1,4 +1,4 @@
-package covergrpc
+package drpc
 
 import (
 	"context"
@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/dmokel/cover-grpc/codec"
+	"github.com/dmokel/dprc/codec"
 )
 
 // Call represents an active RPC.

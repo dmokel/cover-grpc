@@ -5,14 +5,14 @@ import (
 	"log"
 	"sync"
 
-	covergrpc "github.com/dmokel/cover-grpc"
+	drpc "github.com/dmokel/dprc"
 )
 
 // Args ...
 type Args struct{ Num1, Num2 int }
 
 func main() {
-	client, err := covergrpc.Dial("tcp", "127.0.0.1:9999")
+	client, err := drpc.Dial("tcp", "127.0.0.1:9999")
 	if err != nil {
 		log.Printf("dial failed, error: %v", err)
 		return

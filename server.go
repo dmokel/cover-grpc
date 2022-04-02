@@ -1,4 +1,4 @@
-package covergrpc
+package drpc
 
 import (
 	"encoding/json"
@@ -14,16 +14,22 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/dmokel/cover-grpc/codec"
+	"github.com/dmokel/dprc/codec"
 )
 
 // MagicNumber ...
-// define the unique magic number for cover-grpc
+// define the unique magic number for drpc
 const magicNumber = 0x3bef5c
+
+const (
+	connected        = "200 Connected to drpc"
+	defaultRPCPath   = "/_covergrpc_"
+	defaultDebugPath = "/debug/drpc"
+)
 
 // Option ...
 type Option struct {
-	MargicNumber      int        // MagicNumber marks this's a cover-grpc rpcPackage
+	MargicNumber      int        // MagicNumber marks this's a drpc rpcPackage
 	CodecType         codec.Type // client may choose different Codec to encode body
 	ConnectionTimeout time.Duration
 	HandleTimeout     time.Duration
