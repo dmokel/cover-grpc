@@ -1,6 +1,7 @@
 package covergrpc
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/dmokel/cover-grpc/codec"
 )
@@ -76,6 +78,7 @@ func NewClient(opt *Option) *Client {
 }
 
 // Dial to rpc server and receive reply from the server circularly
+// Timeout mechanism is supported by default
 func (c *Client) Dial(network, address string) (err error) {
 	var rwc net.Conn
 	defer func() {
@@ -91,22 +94,46 @@ func (c *Client) Dial(network, address string) (err error) {
 		return
 	}
 
-	rwc, err = net.Dial(network, address)
+	rwc, err = net.DialTimeout(network, address, c.opt.ConnectionTimeout)
 	if err != nil {
-		log.Println("rpc client: dial error:", err)
+		log.Println("rpc client: dial with timeout error:", err)
 		return
 	}
 
-	if err = json.NewEncoder(rwc).Encode(c.opt); err != nil {
-		log.Println("rpc client: option encode failed, err: ", err)
+	var cc codec.Codec
+	cc, err = c.initCodecTimeout(f, rwc)
+	if err != nil {
+		log.Printf("rpc client: init codec error: %s", err)
 		return
 	}
 
-	cc := f(rwc)
 	conn := c.newConn(cc)
 	c.conn = conn
 	go conn.receive()
 	return
+}
+
+func (c *Client) initCodecTimeout(f codec.NewCodecFunc, rwc net.Conn) (cc codec.Codec, err error) {
+	ch := make(chan codec.Codec)
+	go func() {
+		if err = json.NewEncoder(rwc).Encode(c.opt); err != nil {
+			log.Println("rpc client: option encode failed, err: ", err)
+			return
+		}
+		cc := f(rwc)
+		ch <- cc
+	}()
+
+	if c.opt.ConnectionTimeout == 0 {
+		cc = <-ch
+		return cc, nil
+	}
+	select {
+	case <-time.After(c.opt.ConnectionTimeout):
+		return nil, errors.New("rpc client: initCodec timeout")
+	case cc = <-ch:
+		return cc, nil
+	}
 }
 
 func (c *Client) newConn(cc codec.Codec) *conn {
@@ -179,7 +206,7 @@ func (c *Client) terminateCalls(err error) {
 
 func parseOption(opts ...*Option) (*Option, error) {
 	if len(opts) == 0 || opts[0] == nil {
-		return DefaultOption, nil
+		return &defaultOption, nil
 	}
 	if len(opts) != 1 {
 		return nil, errors.New("number of options is more than 1")
@@ -188,6 +215,12 @@ func parseOption(opts ...*Option) (*Option, error) {
 	opt.MargicNumber = defaultOption.MargicNumber
 	if opt.CodecType == "" {
 		opt.CodecType = defaultOption.CodecType
+	}
+	if opt.ConnectionTimeout == 0 {
+		opt.ConnectionTimeout = defaultOption.ConnectionTimeout
+	}
+	if opt.HandleTimeout == 0 {
+		opt.HandleTimeout = defaultOption.HandleTimeout
 	}
 	return opt, nil
 }
@@ -253,7 +286,13 @@ func (c *Client) Go(serviceMethod string, args, reply interface{}, done chan *Ca
 
 // Call invokes the named function, waits for it to complete,
 // and returns its error status.
-func (c *Client) Call(serverMethod string, args, reply interface{}) error {
-	call := <-c.Go(serverMethod, args, reply, make(chan *Call, 1)).Done
-	return call.Error
+func (c *Client) Call(ctx context.Context, serverMethod string, args, reply interface{}) error {
+	call := c.Go(serverMethod, args, reply, make(chan *Call, 1))
+	select {
+	case <-ctx.Done():
+		c.removeCall(call.Seq)
+		return errors.New("rpc client: call failed: " + ctx.Err().Error())
+	case call = <-call.Done:
+		return call.Error
+	}
 }

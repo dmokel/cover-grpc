@@ -3,6 +3,7 @@ package covergrpc
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"go/ast"
 	"io"
 	"log"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/dmokel/cover-grpc/codec"
 )
@@ -21,15 +23,18 @@ const magicNumber = 0x3bef5c
 
 // Option ...
 type Option struct {
-	MargicNumber int        // MagicNumber marks this's a cover-grpc rpcPackage
-	CodecType    codec.Type // client may choose different Codec to encode body
+	MargicNumber      int        // MagicNumber marks this's a cover-grpc rpcPackage
+	CodecType         codec.Type // client may choose different Codec to encode body
+	ConnectionTimeout time.Duration
+	HandleTimeout     time.Duration
 }
 
 // DefaultOption ...
 var DefaultOption = &defaultOption
 var defaultOption = Option{
-	MargicNumber: magicNumber,
-	CodecType:    codec.GobType,
+	MargicNumber:      magicNumber,
+	CodecType:         codec.GobType,
+	ConnectionTimeout: time.Second * 10,
 }
 
 // Server ...
@@ -118,8 +123,9 @@ func (s *Server) newConn(rwc io.ReadWriteCloser) *conn {
 	cc := f(rwc)
 
 	return &conn{
-		srv: s,
-		cc:  cc,
+		srv:           s,
+		cc:            cc,
+		handleTimeout: opt.HandleTimeout,
 	}
 }
 
@@ -128,6 +134,8 @@ type conn struct {
 	srv    *Server
 	client *Client
 	cc     codec.Codec
+
+	handleTimeout time.Duration
 }
 
 // rpcPackage stores all information of a call
@@ -204,11 +212,34 @@ func (c *conn) readPackage() (*rpcPackage, error) {
 
 func (c *conn) handlePackage(pkg *rpcPackage, wg *sync.WaitGroup, sending *sync.Mutex) {
 	defer wg.Done()
-	if err := pkg.svc.call(pkg.mtype, pkg.argv, pkg.replyv); err != nil {
-		pkg.h.Error = err.Error()
-		c.sendPackage(pkg.h, invalidPackage, sending)
+
+	called := make(chan struct{})
+	sent := make(chan struct{})
+	go func() {
+		err := pkg.svc.call(pkg.mtype, pkg.argv, pkg.replyv)
+		called <- struct{}{}
+		if err != nil {
+			pkg.h.Error = err.Error()
+			c.sendPackage(pkg.h, invalidPackage, sending)
+			sent <- struct{}{}
+			return
+		}
+		c.sendPackage(pkg.h, pkg.replyv.Interface(), sending)
+		sent <- struct{}{}
+	}()
+
+	if c.handleTimeout == 0 {
+		<-called
+		<-sent
+		return
 	}
-	c.sendPackage(pkg.h, pkg.replyv.Interface(), sending)
+	select {
+	case <-time.After(c.handleTimeout):
+		pkg.h.Error = fmt.Sprintf("rpc server: rpcPackage handle timeout: expect within %s", c.handleTimeout)
+		c.sendPackage(pkg.h, invalidPackage, sending)
+	case <-called:
+		<-sent
+	}
 }
 
 func (c *conn) sendPackage(h *codec.Header, body interface{}, sending *sync.Mutex) {
