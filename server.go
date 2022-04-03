@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"reflect"
 	"strings"
 	"sync"
@@ -23,7 +24,7 @@ const magicNumber = 0x3bef5c
 
 const (
 	connected        = "200 Connected to drpc"
-	defaultRPCPath   = "/_covergrpc_"
+	defaultRPCPath   = "/_drpc_"
 	defaultDebugPath = "/debug/drpc"
 )
 
@@ -134,6 +135,45 @@ func (s *Server) newConn(rwc io.ReadWriteCloser) *conn {
 		handleTimeout: opt.HandleTimeout,
 	}
 }
+
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodConnect {
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(http.StatusMethodNotAllowed)
+		_, _ = io.WriteString(w, "405 must CONNECT\n")
+		return
+	}
+
+	rwc, _, err := w.(http.Hijacker).Hijack()
+	if err != nil {
+		log.Printf("rpc server: hijacking %s failed, err: %s\n", r.RemoteAddr, err)
+		return
+	}
+
+	_, err = io.WriteString(rwc, "HTTP/1.0 "+connected+"\n\n")
+	if err != nil {
+		log.Printf("rpc server: write response failed, err: %v\n", err)
+		rwc.Close()
+		return
+	}
+
+	conn := s.newConn(rwc)
+	if conn == nil {
+		log.Println("rpc server: new conn failed")
+		rwc.Close()
+		return
+	}
+	conn.Serve()
+}
+
+// HandleHTTP register Server at defaultRPCPath by net.http engine
+func (s *Server) HandleHTTP() {
+	http.Handle(defaultRPCPath, s)
+	log.Printf("rpc server: httpServer Serve success\n")
+}
+
+// HandleHTTP register defaultServer at defaultRPCPath by net.http engine
+func HandleHTTP() { defaultServer.HandleHTTP() }
 
 // conn represent the rpc connection
 type conn struct {

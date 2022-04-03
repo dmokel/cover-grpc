@@ -2,7 +2,7 @@ package main
 
 import (
 	"log"
-	"net"
+	"net/http"
 
 	drpc "github.com/dmokel/dprc"
 )
@@ -25,10 +25,13 @@ func main() {
 	if err := drpc.Register(&foo); err != nil {
 		log.Fatal("register failed, error: ", err)
 	}
+	drpc.HandleHTTP()
 
-	l, err := net.Listen("tcp", "127.0.0.1:9999")
-	if err != nil {
-		log.Fatal("network error:", err)
-	}
-	log.Println(drpc.Serve(l))
+	http.HandleFunc("/debug", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("<html>hello</html>"))
+		return
+	})
+
+	http.ListenAndServe("127.0.0.1:9999", nil)
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -84,4 +85,27 @@ func TestClient_CallTimeout(t *testing.T) {
 		err := client.Call(context.Background(), "Bar.Timeout", 1, &reply)
 		_assert(err != nil && strings.Contains(err.Error(), "handle timeout"), "expect handle timeout err")
 	})
+}
+
+func startHTTPServer() {
+	var foo Foo
+	Register(&foo)
+
+	HandleHTTP()
+	// http.HandleFunc() // register the other http handlers at router
+	http.ListenAndServe("127.0.0.1:9999", nil)
+}
+
+func TestHTTPServer(t *testing.T) {
+	go startHTTPServer()
+	time.Sleep(time.Second * 1)
+
+	client, err := DialHTTP("tcp", "127.0.0.1:9999")
+	if err != nil {
+		t.Fatal("DialHTTP failed, err:", err)
+	}
+
+	var reply int
+	err = client.Call(context.Background(), "Foo.Sum", Args{Num1: 1, Num2: 2}, &reply)
+	_assert(err == nil && reply == 3, "expect no error and reply 3")
 }

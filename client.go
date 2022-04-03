@@ -1,6 +1,7 @@
 package drpc
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -111,6 +113,81 @@ func (c *Client) Dial(network, address string) (err error) {
 	c.conn = conn
 	go conn.receive()
 	return
+}
+
+// DialHTTP ...
+func (c *Client) DialHTTP(network, address string) (err error) {
+	var rwc net.Conn
+	defer func() {
+		if err != nil {
+			_ = rwc.Close()
+		}
+	}()
+
+	f := codec.NewCodecFuncMap[c.opt.CodecType]
+	if f == nil {
+		err = fmt.Errorf("invalid codec type %s", c.opt.CodecType)
+		log.Println("rpc client: codec error:", err)
+		return
+	}
+
+	rwc, err = net.DialTimeout(network, address, c.opt.ConnectionTimeout)
+	if err != nil {
+		log.Println("rpc client: dial with timeout error:", err)
+		return
+	}
+
+	err = c.verifyHTTPTimeout(rwc)
+	if err != nil {
+		log.Printf("rpc client: verify http with timeout error: %s", err)
+		return
+	}
+
+	var cc codec.Codec
+	cc, err = c.initCodecTimeout(f, rwc)
+	if err != nil {
+		log.Printf("rpc client: init codec error: %s", err)
+		return
+	}
+
+	conn := c.newConn(cc)
+	c.conn = conn
+	go conn.receive()
+	return
+}
+
+func (c *Client) verifyHTTPTimeout(conn net.Conn) error {
+	var ch = make(chan error)
+	go func() {
+		var err error
+		_, err = io.WriteString(conn, fmt.Sprintf("CONNECT %s HTTP/1.0\n\n", defaultRPCPath))
+		if err != nil {
+			ch <- err
+			return
+		}
+
+		// Require successful HTTP response before switching to RPC protocol.
+		resp, err := http.ReadResponse(bufio.NewReader(conn), &http.Request{Method: http.MethodConnect})
+		if err == nil && resp.Status == connected {
+			ch <- nil
+			return
+		}
+		if err == nil {
+			ch <- errors.New("unexpected HTTP response: " + resp.Status)
+			return
+		}
+		ch <- err
+	}()
+
+	if c.opt.ConnectionTimeout == 0 {
+		return <-ch
+	}
+	select {
+	case <-time.After(c.opt.ConnectionTimeout):
+		return errors.New("rpc client: verify HTTP timeout")
+	case err := <-ch:
+		return err
+	}
 }
 
 func (c *Client) initCodecTimeout(f codec.NewCodecFunc, rwc net.Conn) (cc codec.Codec, err error) {
@@ -234,6 +311,22 @@ func Dial(network, address string, opts ...*Option) (c *Client, err error) {
 
 	client := NewClient(opt)
 	err = client.Dial(network, address)
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+// DialHTTP connects to an RPC server at the specified network address by http protocol
+func DialHTTP(network, address string, opts ...*Option) (c *Client, err error) {
+	opt, err := parseOption(opts...)
+	if err != nil {
+		return nil, err
+	}
+
+	client := NewClient(opt)
+	err = client.DialHTTP(network, address)
 	if err != nil {
 		return nil, err
 	}

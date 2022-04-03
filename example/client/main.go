@@ -12,7 +12,7 @@ import (
 type Args struct{ Num1, Num2 int }
 
 func main() {
-	client, err := drpc.Dial("tcp", "127.0.0.1:9999")
+	client, err := drpc.DialHTTP("tcp", "127.0.0.1:9999")
 	if err != nil {
 		log.Printf("dial failed, error: %v", err)
 		return
